@@ -1,0 +1,1507 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String?
+  emailVerified     Boolean  @default(false)
+  emailVerifiedAt   DateTime?
+  verificationToken  String?  @unique
+  verificationTokenExpires DateTime?
+  resetToken        String?  @unique
+  resetTokenExpires DateTime?
+  stripeCustomerId String?  @unique // Stripe customer ID
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  datasets         Dataset[]
+  fineTuningJobs   FineTuningJob[]
+  fineTunedModels  FineTunedModel[]
+  evaluations      Evaluation[]
+  subscriptions    Subscription[]
+  apiUsage         ApiUsage[]
+  apiKeys          ApiKey[]
+  userRoles        UserRole[]
+  auditLogs        AuditLog[]
+  invoices         Invoice[]
+  dunningAttempts  DunningAttempt[]
+  dunningConfiguration DunningConfiguration?
+  taxCalculations  TaxCalculation[]
+  taxExemption     TaxExemption?
+  abTests          ABTest[]
+  abTestResults    ABTestResult[]
+  monitoringConfig MonitoringConfig?
+  deployments      Deployment[]
+  promptTemplates  PromptTemplate[]
+  integrations     Integration[]
+  dataFlows        DataFlow[]
+  webhooks         Webhook[]
+  humanFeedback    HumanFeedback[]
+  preferenceTasks  PreferenceLearningTask[]
+  rlhfJobs         RLHFTrainingJob[]
+  feedbackSessions FeedbackSession[]
+  
+  // Indexes
+  @@index([createdAt])
+  @@index([email])
+  @@index([emailVerified])
+  @@index([verificationToken])
+  @@index([resetToken])
+  @@index([stripeCustomerId])
+}
+
+model BaseModel {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  provider    String   // "openai", "anthropic", "meta", "mistral", etc.
+  modelId     String   // "gpt-4", "claude-3", "llama-3", etc.
+  parameters  Json     // Model parameters and capabilities
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  fineTuningJobs FineTuningJob[]
+  fineTunedModels FineTunedModel[]
+  evaluations Evaluation[]
+  
+  // Indexes
+  @@index([provider])
+  @@index([isActive])
+  @@index([createdAt])
+  @@unique([provider, modelId])
+}
+
+model Dataset {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  fileName    String
+  fileSize    Int
+  format      String   // "jsonl", "csv", "txt", etc.
+  recordCount Int
+  status      DatasetStatus @default(UPLOADING)
+  filePath    String?
+  storageKey  String?  // Storage key for cloud storage
+  errorMessage String?  // Error message if upload failed
+  progress    Float?   // Upload progress (0-100)
+  metadata    Json?
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fineTuningJobs FineTuningJob[]
+  datasetConversions DatasetConversion[]
+  qualityAssessments QualityAssessment[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([format])
+}
+
+model FineTuningJob {
+  id               String            @id @default(cuid())
+  name             String
+  description      String?
+  status           FineTuningStatus  @default(PENDING)
+  baseModelId      String
+  datasetId        String
+  userId           String
+  hyperparameters  Json?
+  trainingMetrics  Json?
+  cost             Float?
+  estimatedTime    Int?             // in minutes
+  actualTime       Int?             // in minutes
+  errorMessage     String?
+  progress         Float?           // Training progress (0-100)
+  currentEpoch     Int?             // Current training epoch
+  totalEpochs      Int?             // Total training epochs
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  // Relations
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  baseModel      BaseModel       @relation(fields: [baseModelId], references: [id])
+  dataset        Dataset         @relation(fields: [datasetId], references: [id])
+  fineTunedModel FineTunedModel?
+  evaluations    Evaluation[]
+  checkpoints    Checkpoint[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([status])
+  @@index([baseModelId])
+  @@index([datasetId])
+  @@index([createdAt])
+  @@index([startedAt])
+  @@index([completedAt])
+}
+
+model FineTunedModel {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  modelId     String   // Unique identifier for the fine-tuned model
+  baseModelId String
+  jobId       String   @unique
+  status      ModelStatus @default(TRAINING)
+  endpoint    String?  // API endpoint for the model
+  parameters  Json
+  metrics     Json?
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deployedAt  DateTime?
+  testId      String?
+
+  // Relations
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  baseModel      BaseModel        @relation(fields: [baseModelId], references: [id])
+  job            FineTuningJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  evaluations    Evaluation[]
+  apiUsage       ApiUsage[]
+  deployments    ModelDeployment[]
+  versions       ModelVersion[]
+  benchmarks     PerformanceBenchmark[]
+  abTests        ABTest[]
+  abTestResults  ABTestResult[]
+  abTestVariants ABTestVariant[]
+  modelMetrics   ModelMetric[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([status])
+  @@index([baseModelId])
+  @@index([createdAt])
+  @@index([deployedAt])
+  @@index([testId])
+  @@unique([modelId])
+}
+
+model Evaluation {
+  id               String   @id @default(cuid())
+  name             String
+  fineTunedModelId String
+  baseModelId      String
+  metrics          Json     // BLEU, ROUGE, perplexity, etc.
+  testResults      Json?
+  userId           String
+  jobId            String?  // Associated fine-tuning job
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fineTunedModel  FineTunedModel   @relation(fields: [fineTunedModelId], references: [id], onDelete: Cascade)
+  baseModel       BaseModel        @relation(fields: [baseModelId], references: [id])
+  job             FineTuningJob?   @relation(fields: [jobId], references: [id])
+  
+  // Indexes
+  @@index([userId])
+  @@index([fineTunedModelId])
+  @@index([baseModelId])
+  @@index([jobId])
+  @@index([createdAt])
+}
+
+model Subscription {
+  id          String           @id @default(cuid())
+  userId      String           @unique
+  plan        SubscriptionPlan @default(FREE)
+  status      SubscriptionStatus @default(ACTIVE)
+  startedAt   DateTime         @default(now())
+  endsAt      DateTime?
+  renewedAt   DateTime?
+  cancelledAt DateTime?
+  stripeSubscriptionId String? @unique // Stripe subscription ID
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([plan])
+  @@index([status])
+  @@index([startedAt])
+  @@index([endsAt])
+  @@index([stripeSubscriptionId])
+}
+
+model ApiUsage {
+  id               String   @id @default(cuid())
+  userId           String
+  fineTunedModelId String?
+  endpoint         String
+  requestCount     Int      @default(0)
+  tokenCount       Int      @default(0)
+  cost             Float    @default(0)
+  date             DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  // Relations
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fineTunedModel FineTunedModel? @relation(fields: [fineTunedModelId], references: [id])
+  
+  // Indexes
+  @@index([userId])
+  @@index([fineTunedModelId])
+  @@index([date])
+  @@index([endpoint])
+  @@index([createdAt])
+}
+
+enum DatasetStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum FineTuningStatus {
+  PENDING
+  QUEUED
+  TRAINING
+  EVALUATING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ModelStatus {
+  TRAINING
+  READY
+  DEPLOYED
+  FAILED
+  DEPRECATED
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  name        String
+  key         String   @unique
+  userId      String
+  permissions Json     // API permissions and scopes
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([key])
+  @@index([isActive])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  resource    String   // "models", "datasets", "api_keys", etc.
+  action      String   // "create", "read", "update", "delete", etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  rolePermissions RolePermission[]
+  
+  // Indexes
+  @@index([resource])
+  @@index([action])
+  @@unique([resource, action])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  level       Int      @default(0) // 0: user, 1: admin, 2: super_admin
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+  
+  // Indexes
+  @@index([level])
+}
+
+model UserRole {
+  id     String @id @default(cuid())
+  userId String
+  roleId String
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String @id @default(cuid())
+  roleId       String
+  permissionId String
+
+  // Relations
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String   // "login", "logout", "api_key_created", "permission_changed", etc.
+  resource    String?  // "user", "api_key", "model", etc.
+  resourceId  String?
+  details     Json?    // Additional event details
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  // Indexes
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+  @@index([ipAddress])
+}
+
+model Invoice {
+  id                String   @id @default(cuid())
+  invoiceNumber     String   @unique
+  userId            String
+  subscriptionId    String?
+  stripeInvoiceId   String?  @unique
+  amount            Float
+  currency          String   @default("usd")
+  status            InvoiceStatus @default(DRAFT)
+  description       String?
+  items             Json     // Invoice line items
+  metadata          Json?
+  pdfUrl            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  dueDate           DateTime?
+  paidAt            DateTime?
+  taxAmount         Float    @default(0)
+  taxRate           Float    @default(0)
+  taxRegion         String?
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+  dunningAttempts DunningAttempt[]
+  taxCalculations TaxCalculation[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([dueDate])
+  @@index([paidAt])
+  @@index([stripeInvoiceId])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PENDING
+}
+
+model DunningAttempt {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  userId      String
+  attempt     Int      // Attempt number (1, 2, 3, etc.)
+  status      DunningStatus @default(PENDING)
+  method      DunningMethod // "email", "sms", "in_app"
+  sentAt      DateTime?
+  openedAt    DateTime?
+  clickedAt   DateTime?
+  paidAt      DateTime?
+  nextAttempt DateTime?
+  message     String?
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([invoiceId])
+  @@index([userId])
+  @@index([status])
+  @@index([attempt])
+  @@index([method])
+  @@index([sentAt])
+  @@index([nextAttempt])
+  @@index([createdAt])
+}
+
+model DunningConfiguration {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  enabled              Boolean  @default(true)
+  maxAttempts          Int      @default(3)
+  retryIntervalDays    Int      @default(3)  // Days between attempts
+  methods              Json     // ["email", "sms", "in_app"]
+  emailTemplate        String?
+  smsTemplate          String?
+  inAppTemplate        String?
+  gracePeriodDays      Int      @default(7)  // Days before suspension
+  autoSuspend          Boolean  @default(true)
+  customRules          Json?    // Custom dunning rules
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([enabled])
+  @@index([createdAt])
+}
+
+enum DunningStatus {
+  PENDING
+  SENT
+  OPENED
+  CLICKED
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum DunningMethod {
+  EMAIL
+  SMS
+  IN_APP
+}
+
+model TaxRegion {
+  id          String   @id @default(cuid())
+  code        String   @unique // "US-CA", "EU-DE", etc.
+  name        String   // "California", "Germany", etc.
+  country     String   // "US", "DE", etc.
+  type        TaxType  // "state", "country", "province"
+  rate        Float    // Tax rate as decimal (0.0825 for 8.25%)
+  enabled     Boolean  @default(true)
+  thresholds  Json?    // Tax thresholds and rules
+  exemptions  Json?    // Tax exemption rules
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  taxCalculations TaxCalculation[]
+  
+  // Indexes
+  @@index([country])
+  @@index([type])
+  @@index([enabled])
+  @@index([code])
+}
+
+model TaxCalculation {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  userId      String
+  regionCode  String
+  taxRate     Float
+  taxAmount   Float
+  subtotal    Float
+  total       Float
+  breakdown   Json     // Detailed tax breakdown
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  invoice   Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  region    TaxRegion  @relation(fields: [regionCode], references: [code])
+  
+  // Indexes
+  @@index([invoiceId])
+  @@index([userId])
+  @@index([regionCode])
+  @@index([createdAt])
+}
+
+model TaxExemption {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  certificate String?  // Tax exemption certificate number
+  type        ExemptionType
+  regions     Json     // List of exempt regions
+  validFrom   DateTime
+  validTo     DateTime?
+  status      ExemptionStatus @default(PENDING)
+  documents   Json?    // Supporting documents
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([validFrom])
+  @@index([validTo])
+}
+
+enum TaxType {
+  COUNTRY
+  STATE
+  PROVINCE
+  COUNTY
+  CITY
+  SPECIAL
+}
+
+enum ExemptionType {
+  RESELLER
+  NON_PROFIT
+  GOVERNMENT
+  EDUCATIONAL
+  CHARITABLE
+  OTHER
+}
+
+enum ExemptionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  REVOKED
+}
+
+model ABTest {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  userId      String
+  status      TestStatus @default(DRAFT)
+  type        TestType
+  goal        TestGoal
+  config      Json     // Test configuration
+  metrics     Json     // Success metrics
+  startDate   DateTime?
+  endDate     DateTime?
+  duration    Int?     // Duration in days
+  trafficSplit Float   @default(0.5) // Percentage split (0.0 to 1.0)
+  sampleSize  Int?     // Target sample size
+  significanceLevel Float @default(0.05) // Statistical significance level
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  // Relations
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  variants  ABTestVariant[]
+  results   ABTestResult[]
+  models    FineTunedModel[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([goal])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([createdAt])
+}
+
+model ABTestVariant {
+  id          String   @id @default(cuid())
+  testId      String
+  name        String
+  description String?
+  modelId     String?  // For model A/B tests
+  config      Json     // Variant-specific configuration
+  isControl   Boolean  @default(false)
+  weight      Float    @default(0.5) // Traffic weight for this variant
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  test    ABTest          @relation(fields: [testId], references: [id], onDelete: Cascade)
+  model   FineTunedModel? @relation(fields: [modelId], references: [id])
+  results ABTestResult[]
+  
+  // Indexes
+  @@index([testId])
+  @@index([modelId])
+  @@index([isControl])
+  @@index([createdAt])
+}
+
+model ABTestResult {
+  id          String   @id @default(cuid())
+  testId      String
+  variantId   String
+  modelId     String?
+  userId      String?
+  sessionId   String?
+  metrics     Json     // Performance metrics for this result
+  conversion  Boolean  @default(false)
+  revenue     Float    @default(0)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  test    ABTest         @relation(fields: [testId], references: [id], onDelete: Cascade)
+  variant ABTestVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  user    User?          @relation(fields: [userId], references: [id])
+  model   FineTunedModel? @relation(fields: [modelId], references: [id])
+  
+  // Indexes
+  @@index([testId])
+  @@index([variantId])
+  @@index([modelId])
+  @@index([userId])
+  @@index([sessionId])
+  @@index([conversion])
+  @@index([createdAt])
+}
+
+enum TestStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum TestType {
+  MODEL
+  PROMPT
+  PARAMETER
+  UI
+  PRICING
+  FEATURE
+}
+
+enum TestGoal {
+  ACCURACY
+  LATENCY
+  COST
+  CONVERSION_RATE
+  USER_SATISFACTION
+  REVENUE
+  ENGAGEMENT
+}
+
+model ModelDeployment {
+  id               String            @id @default(cuid())
+  fineTunedModelId String
+  endpoint         String            @unique
+  status           DeploymentStatus  @default(PENDING)
+  url              String?
+  region           String?
+  provider         String            // "openai", "aws", "gcp", "azure", etc.
+  configuration    Json              // Deployment configuration
+  metrics          Json?
+  cost             Float             @default(0)
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deployedAt       DateTime?
+  terminatedAt     DateTime?
+
+  // Relations
+  fineTunedModel FineTunedModel @relation(fields: [fineTunedModelId], references: [id], onDelete: Cascade)
+  modelMetrics ModelMetric[]
+  
+  // Indexes
+  @@index([fineTunedModelId])
+  @@index([status])
+  @@index([provider])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([deployedAt])
+}
+
+model ModelVersion {
+  id               String   @id @default(cuid())
+  fineTunedModelId String
+  version          String   // Semantic versioning (e.g., "1.0.0", "1.1.0")
+  name             String
+  description      String?
+  status           VersionStatus @default(DRAFT)
+  checkpoint       String?  // Model checkpoint path or identifier
+  metrics          Json?
+  parameters       Json
+  isActive         Boolean  @default(false)
+  isProduction     Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  releasedAt       DateTime?
+
+  // Relations
+  fineTunedModel FineTunedModel @relation(fields: [fineTunedModelId], references: [id], onDelete: Cascade)
+  benchmarks     PerformanceBenchmark[]
+  
+  // Indexes
+  @@index([fineTunedModelId])
+  @@index([version])
+  @@index([status])
+  @@index([isActive])
+  @@index([isProduction])
+  @@index([createdAt])
+  @@index([releasedAt])
+  @@unique([fineTunedModelId, version])
+}
+
+model PerformanceBenchmark {
+  id               String   @id @default(cuid())
+  fineTunedModelId String
+  versionId        String?
+  name             String
+  benchmarkType    String   // "latency", "throughput", "accuracy", "cost", etc.
+  metrics          Json     // Benchmark results
+  configuration    Json     // Test configuration
+  environment      Json?    // Test environment details
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  fineTunedModel FineTunedModel @relation(fields: [fineTunedModelId], references: [id], onDelete: Cascade)
+  version        ModelVersion?  @relation(fields: [versionId], references: [id])
+  
+  // Indexes
+  @@index([fineTunedModelId])
+  @@index([versionId])
+  @@index([benchmarkType])
+  @@index([createdAt])
+}
+
+enum DeploymentStatus {
+  PENDING
+  DEPLOYING
+  DEPLOYED
+  FAILED
+  TERMINATED
+  UPDATING
+}
+
+enum VersionStatus {
+  DRAFT
+  TESTING
+  STAGING
+  PRODUCTION
+  DEPRECATED
+  ARCHIVED
+}
+
+// Monitoring Models
+model SystemHealth {
+  id          String   @id @default(cuid())
+  component   String   // "api", "database", "models", "queue", etc.
+  status      HealthStatus @default(HEALTHY)
+  message     String?
+  metrics     Json?    // Health check metrics
+  checkedAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  // Indexes
+  @@index([component])
+  @@index([status])
+  @@index([checkedAt])
+  @@index([createdAt])
+}
+
+model ModelMetric {
+  id               String   @id @default(cuid())
+  fineTunedModelId String
+  deploymentId     String?
+  metricType       MetricType // "latency", "throughput", "error_rate", "cost", etc.
+  value            Float
+  unit             String?  // "ms", "requests/sec", "%", "USD", etc.
+  timestamp        DateTime @default(now())
+  metadata         Json?    // Additional metric context
+  createdAt        DateTime @default(now())
+
+  // Relations
+  fineTunedModel FineTunedModel @relation(fields: [fineTunedModelId], references: [id], onDelete: Cascade)
+  deployment     ModelDeployment? @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
+  
+  // Indexes
+  @@index([fineTunedModelId])
+  @@index([deploymentId])
+  @@index([metricType])
+  @@index([timestamp])
+  @@index([createdAt])
+}
+
+model Alert {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        AlertType // "model", "system", "billing", "security", etc.
+  severity    AlertSeverity @default(MEDIUM)
+  status      AlertStatus @default(ACTIVE)
+  condition   Json     // Alert condition rules
+  triggeredAt DateTime?
+  resolvedAt  DateTime?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  alertHistory AlertHistory[]
+  
+  // Indexes
+  @@index([type])
+  @@index([severity])
+  @@index([status])
+  @@index([triggeredAt])
+  @@index([resolvedAt])
+  @@index([createdAt])
+}
+
+model AlertHistory {
+  id          String   @id @default(cuid())
+  alertId     String
+  message     String
+  severity    AlertSeverity
+  triggeredAt DateTime @default(now())
+  resolvedAt  DateTime?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([alertId])
+  @@index([severity])
+  @@index([triggeredAt])
+  @@index([resolvedAt])
+  @@index([createdAt])
+}
+
+model MonitoringConfig {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  enabled     Boolean  @default(true)
+  metrics     Json     // Enabled metrics and thresholds
+  alerts      Json     // Alert configurations
+  notifications Json    // Notification settings
+  retentionDays Int    @default(30) // Data retention period
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([enabled])
+  @@index([createdAt])
+}
+
+model ApiEndpoint {
+  id          String   @id @default(cuid())
+  path        String
+  method      String   // "GET", "POST", "PUT", "DELETE", etc.
+  service     String   // "models", "datasets", "billing", etc.
+  status      EndpointStatus @default(ACTIVE)
+  responseTime Float?  // Average response time in ms
+  errorRate   Float?   // Error rate as percentage
+  requestCount Int     @default(0)
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  apiMetrics ApiMetric[]
+  
+  // Indexes
+  @@index([path])
+  @@index([method])
+  @@index([service])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ApiMetric {
+  id          String   @id @default(cuid())
+  endpointId  String
+  userId      String?
+  requestTime Float    // Response time in ms
+  statusCode  Int      // HTTP status code
+  error       String?
+  userAgent   String?
+  ipAddress   String?
+  timestamp   DateTime @default(now())
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  endpoint ApiEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([endpointId])
+  @@index([userId])
+  @@index([statusCode])
+  @@index([timestamp])
+  @@index([createdAt])
+}
+
+// Missing models for dataset operations
+model DatasetConversion {
+  id          String   @id @default(cuid())
+  datasetId   String
+  fromFormat  String
+  toFormat    String
+  status      String   @default("PENDING")
+  progress    Float    @default(0)
+  outputPath  String?
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([datasetId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model QualityAssessment {
+  id          String   @id @default(cuid())
+  datasetId   String
+  overallScore Float
+  metrics     Json     // Detailed quality metrics
+  issues      Json?    // Quality issues found
+  recommendations Json? // Improvement recommendations
+  status      String   @default("COMPLETED")
+  assessedBy  String?  // User or system that performed assessment
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([datasetId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Checkpoint {
+  id          String   @id @default(cuid())
+  jobId       String
+  step        Int
+  epoch       Int
+  loss        Float?
+  accuracy    Float?
+  metrics     Json?
+  checkpointPath String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  job FineTuningJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([jobId])
+  @@index([step])
+  @@index([epoch])
+  @@index([createdAt])
+}
+
+// Additional models for deployment and monitoring
+model Deployment {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  modelId     String   // Fine-tuned model ID
+  endpoint    String
+  status      DeploymentStatus @default(PENDING)
+  config      Json     // Deployment configuration
+  metrics     Json?    // Performance metrics
+  cost        Float?
+  deployedAt  DateTime?
+  terminatedAt DateTime?
+  error       String?
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([modelId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([deployedAt])
+}
+
+// Prompt Tuning Models
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  category    String   // "Customer Service", "Development", "Content", etc.
+  template    String   // The prompt template with {variables}
+  variables   Json     // Array of variable names extracted from template
+  tags        Json?    // Additional tags and metadata
+  isActive    Boolean  @default(true)
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  performance  PromptPerformance?
+  tests        PromptTest[]
+  optimizations PromptOptimization[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([category])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model PromptPerformance {
+  id               String   @id @default(cuid())
+  promptTemplateId String   @unique
+  accuracy         Float    // Accuracy score (0-1)
+  responseTime     Float    // Average response time in seconds
+  userSatisfaction Float    // User satisfaction score (0-1)
+  totalTests       Int      @default(0)
+  lastTestedAt     DateTime?
+  metrics          Json?    // Additional performance metrics
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  promptTemplate PromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([promptTemplateId])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model PromptTest {
+  id               String   @id @default(cuid())
+  promptTemplateId String
+  input            String
+  expectedOutput   String?
+  actualOutput     String?
+  score            Float?   // Test score (0-1)
+  status           PromptTestStatus @default(PENDING)
+  metadata         Json?    // Test metadata and context
+  createdAt        DateTime @default(now())
+  completedAt      DateTime?
+
+  // Relations
+  promptTemplate PromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([promptTemplateId])
+  @@index([status])
+  @@index([score])
+  @@index([createdAt])
+  @@index([completedAt])
+}
+
+model PromptOptimization {
+  id               String   @id @default(cuid())
+  promptTemplateId String
+  originalPrompt   String
+  optimizedPrompt   String
+  improvement      Float    // Improvement percentage (0-1)
+  metrics          Json     // Optimization metrics (clarity, specificity, etc.)
+  optimizationType String   // "clarity", "specificity", "effectiveness", "conciseness"
+  metadata         Json?    // Optimization metadata
+  createdAt        DateTime @default(now())
+
+  // Relations
+  promptTemplate PromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([promptTemplateId])
+  @@index([improvement])
+  @@index([optimizationType])
+  @@index([createdAt])
+}
+
+enum PromptTestStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// Integration Hub Models
+model Integration {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  category    String   // "Productivity", "Development", "Communication", etc.
+  icon        String   // Icon name or identifier
+  status      IntegrationStatus @default(DISCONNECTED)
+  config      Json     // Integration configuration (API keys, OAuth tokens, etc.)
+  lastSync    DateTime?
+  dataCount   Int      @default(0)
+  metrics     Json?    // Performance metrics
+  isActive    Boolean  @default(true)
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dataFlows DataFlow[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([category])
+  @@index([status])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model DataFlow {
+  id               String   @id @default(cuid())
+  sourceIntegration String
+  targetIntegration String
+  status           DataFlowStatus @default(ACTIVE)
+  dataVolume       String   // Human-readable data volume
+  lastTransfer     DateTime?
+  transformation   String   // Description of data transformation
+  config           Json?    // Flow configuration
+  metadata         Json?    // Additional metadata
+  userId           String
+  integrationId    String?  // Optional relation to Integration model
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  integration Integration? @relation(fields: [integrationId], references: [id])
+  
+  // Indexes
+  @@index([userId])
+  @@index([sourceIntegration])
+  @@index([targetIntegration])
+  @@index([status])
+  @@index([integrationId])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model Webhook {
+  id           String   @id @default(cuid())
+  name         String
+  url          String
+  events       Json     // Array of event types
+  status       WebhookStatus @default(INACTIVE)
+  headers      Json?    // Custom headers
+  secret       String?  // Webhook secret for validation
+  lastTriggered DateTime?
+  triggerCount Int      @default(0)
+  metadata     Json?    // Additional metadata
+  userId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([status])
+  @@index([url])
+  @@index([triggerCount])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  CONNECTING
+  ERROR
+}
+
+enum DataFlowStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+enum WebhookStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+}
+
+// RLHF Models
+model HumanFeedback {
+  id          String   @id @default(cuid())
+  modelId     String
+  prompt      String
+  response    String
+  rating      Int      // 1-5 scale
+  feedback    String?
+  categories  Json     // {accuracy, helpfulness, clarity, relevance} scores
+  userId      String
+  status      FeedbackStatus @default(PENDING)
+  metadata    Json?    // Additional feedback metadata
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([modelId])
+  @@index([rating])
+  @@index([status])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model PreferenceLearningTask {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  modelId       String
+  status        PreferenceTaskStatus @default(COLLECTING)
+  progress      Float    @default(0)
+  pairsCollected Int     @default(0)
+  targetPairs   Int
+  improvement   Float    @default(0)
+  config        Json?    // Task configuration
+  metadata      Json?    // Additional metadata
+  userId        String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  completedAt   DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([modelId])
+  @@index([status])
+  @@index([progress])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model RLHFTrainingJob {
+  id               String   @id @default(cuid())
+  name             String
+  baseModelId      String
+  feedbackDatasetId String
+  status           RLHFJobStatus @default(PENDING)
+  progress         Float    @default(0)
+  currentEpoch     Int      @default(0)
+  totalEpochs      Int
+  metrics          Json     // {loss, reward, accuracy, kl_divergence}
+  hyperparameters  Json?    // Training hyperparameters
+  config           Json?    // Job configuration
+  userId           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([baseModelId])
+  @@index([status])
+  @@index([progress])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model FeedbackSession {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  modelId     String
+  isActive    Boolean  @default(true)
+  promptCount Int      @default(0)
+  feedbackCount Int    @default(0)
+  config      Json?    // Session configuration
+  metadata    Json?    // Additional metadata
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastActivity DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Indexes
+  @@index([userId])
+  @@index([modelId])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+enum FeedbackStatus {
+  PENDING
+  PROCESSED
+  USED_IN_TRAINING
+  ARCHIVED
+}
+
+enum PreferenceTaskStatus {
+  COLLECTING
+  TRAINING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum RLHFJobStatus {
+  PENDING
+  TRAINING
+  EVALUATING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// Enums for monitoring
+enum HealthStatus {
+  HEALTHY
+  WARNING
+  CRITICAL
+  UNKNOWN
+}
+
+enum MetricType {
+  LATENCY
+  THROUGHPUT
+  ERROR_RATE
+  COST
+  MEMORY_USAGE
+  CPU_USAGE
+  GPU_USAGE
+  TOKEN_COUNT
+  REQUEST_COUNT
+  SUCCESS_RATE
+  AVAILABILITY
+}
+
+enum AlertType {
+  MODEL
+  SYSTEM
+  BILLING
+  SECURITY
+  PERFORMANCE
+  AVAILABILITY
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AlertStatus {
+  ACTIVE
+  TRIGGERED
+  RESOLVED
+  DISABLED
+}
+
+enum EndpointStatus {
+  ACTIVE
+  DEGRADED
+  DOWN
+  MAINTENANCE
+}
